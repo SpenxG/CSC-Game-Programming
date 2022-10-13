@@ -1,0 +1,431 @@
+
+<body></body>
+<script src="http://gamingJS.com/Three.js"></script>
+<script src="http://gamingJS.com/Tween.js"></script>
+<script src="http://gamingJS.com/ChromeFixes.js"></script>
+<script src="http://gamingJS.com/Scoreboard.js"></script>
+<script src="http://gamingJS.com/Sounds.js"></script>
+<script>
+  // This is where stuff in our game will happen:
+  // All objects will be added to it
+  var scene = new THREE.Scene();
+ 
+  // This is what sees the stuff:
+  var aspect_ratio = window.innerWidth / window.innerHeight;
+  // The camera shows a certain part of the scene
+  var camera = new THREE.PerspectiveCamera(75, aspect_ratio, 1, 10000);
+  camera.position.z = 800;
+  camera.position.y = 300;
+  //scene.add(camera);
+ 
+  // This will draw what the camera sees onto the screen:
+  var renderer = new THREE.WebGLRenderer();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+ 
+  // places where the avatar cannot move into
+  var not_allowed = [];
+ 
+  // html/js function which has an event which contains the mouse position on the screen
+  document.onmousemove = function(e) {
+    // the coords of the mouse, from the top left of the screen
+    var mousex = e.pageX;
+    var mousey = e.pageY;
+    camera.rotation.y = map(mousex, 0, window.innerWidth, -Math.PI/10, Math.PI/10);
+    camera.rotation.x = map(mousey, 0, window.innerHeight, -Math.PI/7, -Math.PI/14);
+  }
+ 
+  // take a value in the first interval and map it to the second interval
+  // the returned value is the same amount through value is through the first interval
+  function map(value, start1, stop1, start2, stop2) {
+    var percent = (value - start1) / (stop1 - start1);
+    return start2 + percent*(stop2 - start2);
+  }
+ 
+  // prints the info messages and time on the top right of the screen
+  var scoreboard = new Scoreboard();
+  scoreboard.countdown(60);
+  scoreboard.score();
+  scoreboard.help(
+    'WASD to move. ' +
+    'Space bar to jump for fruit. ' +
+    'Watch for shaking trees with fruit.' +
+    'Get near the tree and jump before the fruit is gone!'
+  );
+ 
+  // function to run when the time runs out
+  var game_over = false;
+  scoreboard.onTimeExpired(function() {
+    scoreboard.message("Game Over!");
+    game_over = true;
+  });
+ 
+  // object for the avatar, head, legs, etc are added to this
+  var marker = new THREE.Object3D();
+  scene.add(marker);
+  marker.add(camera);
+ 
+  // the ground is a cylinder so it has depth, and is below the trees
+  var ground = new THREE.Mesh(
+    new THREE.CylinderGeometry(10000, 10000, 50),
+    new THREE.MeshBasicMaterial({
+      color: 0xD9C79F
+    })
+  );
+  ground.position.y = -350;
+  scene.add(ground);
+ 
+  // setting the color of the sky, the background color of the doc
+  document.bgColor = "lightblue";
+ 
+  // avatar is specifically the body of the avatar
+  var coverlegs = new THREE.MeshBasicMaterial({color: 0x1520A6});
+  var coverbody = new THREE.MeshBasicMaterial({color: 0x022D36});
+  var cover = new THREE.MeshBasicMaterial({color: 0xecbcb4});
+  var body = new THREE.CylinderGeometry(100,50,150);
+  var avatar = new THREE.Mesh(body, coverbody);
+  
+  marker.add(avatar);
+ 
+  // the head will have rotation, described below
+  var head = new THREE.Mesh(new THREE.SphereGeometry(50), cover);
+  head.position.set(30, 140, 0);
+  avatar.add(head);
+ 
+  // the following are simple components of the body
+  var hand = new THREE.CylinderGeometry(30,10,150);
+ 
+  var right_hand = new THREE.Mesh(hand, cover);
+  right_hand.position.set(-150, 0, -50);
+  right_hand.rotation.z =  Math.PI / -3;
+  avatar.add(right_hand);
+ 
+  var left_hand = new THREE.Mesh(hand, cover);
+  left_hand.position.set(150, 0, -50);
+  left_hand.rotation.z =  Math.PI / 3;
+  avatar.add(left_hand);
+ 
+  var foot = new THREE.CylinderGeometry(40,20,150);
+ 
+  var right_foot = new THREE.Mesh(foot, coverlegs);
+  right_foot.position.set(-50, -125, 0);
+  avatar.add(right_foot);
+ 
+  var left_foot = new THREE.Mesh(foot, coverlegs);
+  left_foot.position.set(50, -125, 0);
+  avatar.add(left_foot);
+ 
+  // moves the head in a diamond shape, linearly in all directions
+  var frameCount = 0;
+  function bounceHead() {
+    var x = head.position.x;
+    var y = head.position.y;
+    if (x <= 30 && x > 0 && y >= 140 && y < 170) {
+      head.position.x -= 2;
+      head.position.y += 2;
+    } else if (x <= 0 && x > -30 && y <= 170 && y > 140) {
+      head.position.x -= 2;
+      head.position.y -= 2;
+    } else if (x >= -30 && x < 0 && y <= 140 && y > 110) {
+      head.position.x += 2;
+      head.position.y -= 2;
+    } else if (x >= 0 && x < 30 && y >= 110 && y < 140) {
+      head.position.x += 2;
+      head.position.y += 2;
+    }
+  }
+ 
+  // makes all the trees, and sets one to be the goal
+  var tree_with_treasure;
+  var trees = [];
+  trees.push(makeTreeAt(500, 0));
+  trees.push(makeTreeAt(-500, 0));
+  trees.push(makeTreeAt(750, -1000));
+  trees.push(makeTreeAt(-750, -1000));
+ 
+  // creates a tree at the desired position
+  function makeTreeAt(x, z) {
+    var trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(10, 75, 300),
+      new THREE.MeshBasicMaterial({
+        color: 0x00A2FD
+      })
+    );
+    
+ 
+    // the green leaves of the tree
+    var top = new THREE.Mesh(
+      new THREE.CubeGeometry(175,175,175),
+      new THREE.MeshBasicMaterial({
+        color: 0x227122
+      })
+    );
+    top.position.y = 275;
+    trunk.add(top);
+ 
+    // the apples of the trees, which are just red spheres
+    for (var i=0; i<5; i++) {
+      var apple = new THREE.Mesh(
+        new THREE.CylinderGeometry(20, 5, 30),
+        new THREE.MeshBasicMaterial({
+          color: 0x003535
+        })
+      );
+      switch(i) {
+      case 0:
+        apple.position.x = 115;
+        apple.position.y = 100;
+        break;
+      case 1:
+        apple.position.x = -120;
+        apple.position.y = 40;
+        apple.position.z = 50;
+        break;
+      case 2:
+        apple.position.x = 40;
+        apple.position.y = 20;
+        apple.position.z = 130;
+        break;
+      case 3:
+        apple.position.x = 130;
+        apple.position.y = -30;
+        apple.position.z = 50;
+        break;
+      case 4:
+        apple.position.x = -70;
+        apple.position.y = -50;
+        apple.position.z = 100;
+        break;
+      }
+      top.add(apple);
+    }
+ 
+    // the bottom ground for the tree
+    var boundary = new THREE.Mesh(
+      new THREE.CylinderGeometry(200, 200, 50),
+      new THREE.MeshBasicMaterial({
+        color: 0x73dc69
+      })
+    );
+    boundary.position.y = -100;
+    //boundary.rotation.x = -Math.PI / 2;
+    boundary.rotation.x = 0;
+    trunk.add(boundary);
+ 
+    // makes it so the player cannot walk on the tree
+    not_allowed.push(boundary);
+ 
+    // sets the position of the tree
+    trunk.position.set(x, -75, z-120);
+    scene.add(trunk);
+ 
+    return top;
+  }
+ 
+  // shakes the goal tree so that player can see which one is the goal
+  function shakeTree() {
+    tree_with_treasure = Math.floor(Math.random() * trees.length);
+ 
+    new TWEEN
+      .Tween({
+        x: 0
+      })
+      .to({
+        x: 2 * Math.PI
+      }, 300)
+      .repeat(20)
+      .onUpdate(function() {
+        trees[tree_with_treasure].position.x = 75 * Math.sin(this.x);
+      })
+      .start();
+ 
+    setTimeout(shakeTree, 20 * 1000);
+  }
+  shakeTree();
+ 
+  // Now, animate what the camera sees on the screen:
+  var clock = new THREE.Clock(true);
+ 
+  // called every frame, so the game will advance and play
+  function animate() {
+    requestAnimationFrame(animate);
+    TWEEN.update();
+    walk();
+    turn();
+    acrobatics();
+    bounceHead();
+    frameCount++;
+    renderer.render(scene, camera);
+  }
+  animate();
+ 
+  // moves the player forward at a set speed;
+  function walk() {
+    if (!isWalking()) return;
+    var position = Math.sin(clock.getElapsedTime() * 10) * 50;
+    right_hand.position.z = position;
+    left_hand.position.z = -position;
+    right_foot.position.z = -position;
+    left_foot.position.z = position;
+  }
+ 
+  // spins the player to the correct direction
+  function turn() {
+    var direction = 0;
+    if (is_moving_forward) direction = Math.PI;
+    if (is_moving_back) direction = 0;
+    if (is_moving_right) direction = Math.PI / 2;
+    if (is_moving_left) direction = -Math.PI / 2;
+ 
+    spinAvatar(direction);
+  }
+ 
+  // the tween to do the spinning
+  function spinAvatar(direction) {
+    new TWEEN
+      .Tween({
+        y: avatar.rotation.y
+      })
+      .to({
+        y: direction
+      }, 100)
+      .onUpdate(function() {
+        avatar.rotation.y = this.y;
+      })
+      .start();
+  }
+ 
+  // sets the flipping/spinning variables
+  // I don't recommend using these...
+  var is_cartwheeling = false;
+  var is_flipping = false;
+ 
+  // does the flipping/spinning
+  function acrobatics() {
+    if (is_cartwheeling) {
+      avatar.rotation.z = avatar.rotation.z + 0.05;
+    }
+    if (is_flipping) {
+      avatar.rotation.x = avatar.rotation.x + 0.05;
+    }
+  }
+ 
+  // decides which direction the player is moving
+  var is_moving_left, is_moving_right, is_moving_forward, is_moving_back;
+  function isWalking() {
+    if (is_moving_right) return true;
+    if (is_moving_left) return true;
+    if (is_moving_forward) return true;
+    if (is_moving_back) return true;
+    return false;
+  }
+ 
+  // listenes for key presses
+  var frameLastJump = 0;
+  document.addEventListener('keydown', function(event) {
+    var code = event.keyCode;
+ 
+    // jumps, but only once every 30 frames
+    if (code == 32) { // space
+      console.log(frameCount);
+      var timeSinceLastJump = frameCount - frameLastJump;
+      if (timeSinceLastJump > 30) {
+        jump();
+        frameLastJump = frameCount;
+      }
+    }
+ 
+    // moves in the desired position
+    var speed = 30;
+    if (code == 37 || code == 65) { // left
+      marker.position.x -= speed;
+      is_moving_left = true;
+    }
+    if (code == 38 || code == 87) { // up
+      marker.position.z -= speed;
+      is_moving_forward = true;
+    }
+    if (code == 39 || code == 68) { // right
+      marker.position.x += speed;
+      is_moving_right = true;
+    }
+    if (code == 40 || code == 83) { // down
+      marker.position.z += speed;
+      is_moving_back = true;
+    }
+    if (code == 67) is_cartwheeling = !is_cartwheeling; // C
+    if (code == 70) is_flipping = !is_flipping; // F
+ 
+    // makes sure the player hasn't moved into a tree
+    if (detectCollisions()) {
+      if (is_moving_left) marker.position.x += speed;
+      if (is_moving_right) marker.position.x -= speed;
+      if (is_moving_forward) marker.position.z += speed;
+      if (is_moving_back) marker.position.z -= speed;
+    }
+  });
+ 
+  // waits for that key to be released, and to stop the movement
+  document.addEventListener('keyup', function(event) {
+    var code = event.keyCode;
+ 
+    if (code == 37 || code == 65) is_moving_left = false;
+    if (code == 38 || code == 87) is_moving_forward = false;
+    if (code == 39 || code == 68) is_moving_right = false;
+    if (code == 40 || code == 83) is_moving_back = false;
+  });
+ 
+  // decides if the player moved into a tree
+  function detectCollisions() {
+    var vector = new THREE.Vector3(0, -1, 0);
+    var ray = new THREE.Ray(marker.position, vector);
+    var intersects = ray.intersectObjects(not_allowed);
+    if (intersects.length > 0) return true;
+    return false;
+  }
+ 
+  // called when the spacebar is placed
+  function jump() {
+    checkForTreasure();
+    animateJump();
+  }
+ 
+  // checks if the player is within the distance of goal tree
+  function checkForTreasure() {
+    if (tree_with_treasure == undefined) return;
+ 
+    var treasure_tree = trees[tree_with_treasure]
+    var p1 = treasure_tree.parent.position
+    var p2 = marker.position;
+ 
+    var distance = Math.sqrt(
+      (p1.x - p2.x) * (p1.x - p2.x) + (p1.z - p2.z) * (p1.z - p2.z)
+    );
+ 
+    if (distance < 500) scorePoints();
+  }
+ 
+  // score points after a good jump if the game is still running
+  function scorePoints() {
+    if (scoreboard.getTimeRemaining() === 0) return;
+    if (scoreboard.getTimeRemaining() > 0) 
+      scoreboard.addPoints(10);
+  }
+ 
+  // tween to do the jumping
+  function animateJump() {
+    new TWEEN
+      .Tween({
+        jump: 0
+      })
+      .to({
+        jump: Math.PI
+      }, 500)
+      .onUpdate(function() {
+        marker.position.y = 200 * Math.sin(this.jump);
+      })
+      .start();
+  }
+</script>
+
+
